@@ -7,7 +7,7 @@ using System.Threading;
 using System.Globalization;
 using System.Windows.Media;
 
-namespace AniLyst_5._0
+namespace Project
 {
     public static partial class Utils
     {
