@@ -1,10 +1,9 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows.Controls;
 using System.Windows;
 using System;
 using System.Threading;
-using System.Globalization;
 using System.Windows.Media;
 
 namespace Project
@@ -13,19 +12,100 @@ namespace Project
     {
         public static ColumnTracker GetColumnTracker(this ListView LST)
         {
-            return GetColumnTracker(LST, GridUnitType.Pixel);
+            return GetColumnTracker(LST, ColumnUnitType.Pixel);
         }
 
-        public static ColumnTracker GetColumnTracker(this ListView LST, GridUnitType GNU)
+        public static ColumnTracker GetColumnTracker(this ListView LST, ColumnUnitType CUT)
         {
-            return GetColumnTracker(LST, GNU, 1);
+            return GetColumnTracker(LST, CUT, 1);
         }
 
-        public static ColumnTracker GetColumnTracker(this ListView LST, GridUnitType GNU, double Width)
+        public static ColumnTracker GetColumnTracker(this ListView LST, ColumnUnitType CUT, double Width)
         {
             if (LST.Tag is ColumnTracker) return LST.Tag as ColumnTracker;
-            else if (LST.View is GridView) return (ColumnTracker)(LST.Tag = new ColumnTracker(LST, GNU, Width));
+            else if (LST.View is GridView) return (ColumnTracker)(LST.Tag = new ColumnTracker(LST, CUT, Width));
             else return null;
+        }
+    }
+
+    public enum ColumnUnitType { Pixel, Star }
+
+    public class ColumnController
+    {
+        public ColumnTracker ColumnTracker { get; set; }
+        public GridViewColumn Column { get; set; }
+        public ColumnUnitType ColumnUnitType { get; set; }
+        public double Width { get; set; }
+        public bool IsFixed { get; set; } = false;
+
+        public ColumnController(GridViewColumn GVC, ColumnTracker CT, ColumnUnitType GUT, double _Width)
+        {
+            ColumnTracker = CT;
+
+            switch (ColumnUnitType = GUT)
+            {
+                case ColumnUnitType.Pixel: IsFixed = false; break;
+                case ColumnUnitType.Star: IsFixed = true; break;
+            }
+            Width = _Width;
+            INotifyPropertyChanged INP = (Column = GVC) as INotifyPropertyChanged;
+            INP.PropertyChanged += Columen_SizeChanged;
+        }
+
+        private bool BlockColumnUpdate = false;
+
+        private void Columen_SizeChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (!BlockColumnUpdate)
+            {
+                if (e.PropertyName == "Width" || e.PropertyName == "ActualWidth") SetWidth();
+            }
+        }
+
+        private bool BlockSetWidth = false;
+
+        public void SetWidth()
+        {
+            if (!BlockSetWidth)
+            {
+                BlockColumnUpdate = true;
+                switch (ColumnUnitType)
+                {
+                    case ColumnUnitType.Pixel:
+                        if (IsFixed) Column.Width = Width;
+                        else
+                        {
+                            Width = Column.Width;
+                            ColumnTracker.UpdateColumnWidths();
+                        }
+
+                        break;
+
+                    case ColumnUnitType.Star:
+                        //if (IsFixed)
+                        //{
+                        Column.Width = Width * ColumnTracker.StarWidth;
+                        //}
+                        //else
+                        //{
+                        //    double HypoWid = ColumnTracker.LSTWidth / GetWidth();
+                        //    if (HypoWid == Width)
+                        //        Width = ColumnTracker.LSTWidth / GetWidth();
+                        //    BlockSetWidth = true;
+                        //    ColumnTracker.UpdateColumnWidths();
+                        //    BlockSetWidth = false;
+                        //}
+                        break;
+                }
+            }
+            BlockColumnUpdate = false;
+        }
+
+        public double GetWidth()
+        {
+            if (Column.Width != double.NaN) return Column.Width;
+            else if (Column.ActualWidth != double.NaN) return Column.ActualWidth;
+            else return double.NaN;
         }
     }
 
@@ -33,126 +113,134 @@ namespace Project
     {
         private ListView LST { get; set; }
         private GridView GRD { get; set; }
-        public Trictionary<GridViewColumn, GridUnitType, double> Columns = new Trictionary<GridViewColumn, GridUnitType, double>();
+        public double StarWidth { get; set; }
+        public Dictionary<GridViewColumn, ColumnController> Columns = new Dictionary<GridViewColumn, ColumnController>();
 
-        private GridUnitType DefaultGUT = GridUnitType.Pixel;
-        private double DefaultWidth = 1;
-
-        //public ColumnTracker(ListView _LST)
-        //{
-        //    SetLSTGRD(_LST);
-        //    CheckColumens(GridUnitType.Pixel);
-        //}
-
-        public ColumnTracker(ListView _LST, GridUnitType GNU)
+        public ColumnTracker(ListView _LST)
         {
-            SetLSTGRD(_LST);
-            CheckColumens(DefaultGUT = GNU, 1);
+            Set_LST_GRD(_LST);
+            CheckColumens(ColumnUnitType.Star, 1);
         }
 
-        public ColumnTracker(ListView _LST, GridUnitType GNU, double Width)
+        public ColumnTracker(ListView _LST, ColumnUnitType CUT)
         {
-            SetLSTGRD(_LST);
-            CheckColumens(DefaultGUT = GNU, DefaultWidth = Width);
+            Set_LST_GRD(_LST);
+            CheckColumens(CUT, 1);
         }
 
-        public void SetLSTGRD(ListView _LST)
+        public ColumnTracker(ListView _LST, ColumnUnitType CUT, double Width)
         {
-            LST = _LST;
-            LST.SizeChanged += LST_SizeChanged;
-            GRD = LST.View as GridView;
-            GRD.Columns.CollectionChanged += Columns_CollectionChanged;
+            Set_LST_GRD(_LST);
+            CheckColumens(CUT, Width);
         }
 
-        public void CheckColumens(GridUnitType GNU, double Width)
+        public void Set_LST_GRD(ListView _LST)
+        {
+            (LST = _LST).SizeChanged += LST_SizeChanged;
+            (GRD = LST.View as GridView).Columns.CollectionChanged += Columns_CollectionChanged;
+            LST.Tag = this;
+            LST.MouseDoubleClick += LST_MouseDoubleClick;
+        }
+
+        public void CheckColumens(ColumnUnitType CUT, double Width)
         {
             foreach (GridViewColumn x in GRD.Columns)
             {
-                if (!Columns.Keys.Contains(x))
-                {
-                    INotifyPropertyChanged INP = x as INotifyPropertyChanged;
-                    INP.PropertyChanged += INP_PropertyChanged;
-
-                    switch (GNU)
-                    {
-                        case GridUnitType.Auto:
-                        case GridUnitType.Pixel:
-
-                            //if (GNU == GridUnitType.Auto)
-                            //{
-                            //  var formattedText = new FormattedText(x.Header.ToString(), CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface(LST.FontFamily, LST.FontStyle, LST.FontWeight, LST.FontStretch), LST.FontSize, LST.Foreground, new NumberSubstitution(), TextFormattingMode.Ideal);
-                            //   Width = formattedText.Width + 2;
-                            //Width = GetAutoWidth(x);
-                            //}
-                            //else
-                            //{
-                            Width = x.ActualWidth;
-                            if (x.Width > Width) Width = x.Width;
-                            //}
-
-                            Columns.Add(x, GridUnitType.Pixel, Width);
-                            break;
-
-                        case GridUnitType.Star:
-                            Columns.Add(x, GridUnitType.Star, Width);
-                            break;
-                    }
-                }
+                try { ColumnController CI = Columns[x]; }
+                catch { Columns.Add(x, new ColumnController(x, this, CUT, Width)); }
             }
         }
 
-        #region Set Columen
+        #region Get
 
-        public void SetColumen(GridViewColumn GVS, GridUnitType GUT) => SetColumen(Columns.IndexOf(GVS), GUT);
-
-        public void SetColumen(GridViewColumn GVS, double Width) => SetColumen(Columns.IndexOf(GVS), Width);
-
-        public void SetColumen(GridViewColumn GVS, GridUnitType GUT, double Width) => SetColumen(Columns.IndexOf(GVS), GUT, Width);
-
-        public void SetColumen(int CN, GridUnitType GUT)
+        public ColumnController GetColumenItem(int ColumenIndex)
         {
-            KeyValueTriple<GridViewColumn, GridUnitType, double> CNKVT = Columns.GetAtIndex(CN);
+            return GetColumenItem(GetColumnAt(ColumenIndex));
+        }
 
-            switch (GUT)
+        public ColumnController GetColumenItem(GridViewColumn GVC)
+        {
+            if (!Columns.ContainsKey(GVC)) Columns.Add(GVC, new ColumnController(GVC, this, ColumnUnitType.Star, 1));
+            return Columns[GVC];
+        }
+
+        public ColumnController GetColumenItem(int index, ColumnUnitType CUT)
+        {
+            return GetColumenItem(GetColumnAt(index), CUT);
+        }
+
+        public ColumnController GetColumenItem(GridViewColumn GVC, ColumnUnitType CUT)
+        {
+            switch (CUT)
             {
-                case GridUnitType.Auto:
-                    //double Wid = CNKVT.Key.Width;
-                    //if (LSTWidth > 0) CNKVT.Control = Wid / LSTWidth;
-                    //else CNKVT.Control = Wid;
-                    //CNKVT.Control = GetAutoWidth(CNKVT.Key);
-                    break;
-
-                case GridUnitType.Pixel: CNKVT.Control = CNKVT.Key.Width; break;
-                case GridUnitType.Star: CNKVT.Control = 1; break;
+                case ColumnUnitType.Pixel: return GetColumenItem(GVC, CUT, GVC.Width);
+                default: return GetColumenItem(GVC, CUT, 1);
             }
-            SetColumen(CN, GUT, CNKVT.Control);
         }
 
-        public void SetColumen(int CN, double Width) => SetColumen(CN, Columns.GetAtIndex(CN).Value, Width);
-
-        public void SetColumen(int CN, GridUnitType GUT, double Width)
+        public ColumnController GetColumenItem(int index, ColumnUnitType CUT, double Width)
         {
-            Columns.GetAtIndex(CN).Value = GUT;
-            Columns.GetAtIndex(CN).Control = Width;
-            if (!IsDead) UpdateColumnWidths();
+            return GetColumenItem(GetColumnAt(index), CUT, Width);
         }
 
-        #endregion Set Columen
-
-        private void INP_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        public ColumnController GetColumenItem(GridViewColumn GVC, ColumnUnitType CUT, double Width)
         {
-            if (!IsDead)
-                if (!BlockColumnUpdate)
-                    if (e.PropertyName == "Width" || e.PropertyName == "ActualWidth")
+            // ColumnController CI = new ColumnController(GVC, this, CUT, Width);
+            if (!Columns.ContainsKey(GVC)) Columns.Add(GVC, new ColumnController(GVC, this, CUT, Width));
+            else
+            {
+                Columns[GVC].ColumnUnitType = CUT;
+                Columns[GVC].Width = Width;
+            }
+            return Columns[GVC];
+        }
+
+        #endregion Get
+
+        #region ListView Controller
+
+        private void LST_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e) => UpdateColumnWidths();
+
+        private void LST_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateColumnWidths();
+
+        public void UpdateColumnWidths()
+        {
+            if (Columns.Count > 0)
+            {
+                new Thread(() =>
+                {
+                    LST.Dispatcher.BeginInvoke(new Action(delegate ()
                     {
-                        GridViewColumn GVC = sender as GridViewColumn;
-                        BlockUpdate = System.Windows.Input.Mouse.LeftButton == System.Windows.Input.MouseButtonState.Pressed;
-                        int Index = Columns.IndexOf(GVC);
-                        if (Columns.GetAtIndex(Index).Value == GridUnitType.Auto) SetColumen(Index, GridUnitType.Auto);
-                        else UpdateColumnWidths();
-                        BlockUpdate = false;
-                    }
+                        double PixelWidth = 0;
+                        double StarDiv = 0;
+                        List<ColumnController> StarController = new List<ColumnController>();
+                        foreach (ColumnController CC in Columns.Values)
+                        {
+                            switch (CC.ColumnUnitType)
+                            {
+                                case ColumnUnitType.Pixel: PixelWidth += CC.GetWidth(); break;
+                                case ColumnUnitType.Star:
+                                    if (GRD.Columns.Contains(CC.Column))
+                                    {
+                                        StarDiv += CC.Width;
+                                        StarController.Add(CC);
+                                    }
+                                    break;
+                            }
+                        }
+
+                        if (LSTOverFlow) PixelWidth += ScrollBarInt;
+                        StarWidth = (LSTWidth - PixelWidth) / StarDiv;
+                        if (StarWidth < 0) StarWidth = 0;
+                        foreach (ColumnController CC in StarController) CC.SetWidth();
+                    }));
+                }).Start();
+            }
         }
+
+        #endregion ListView Controller
+
+        #region GridView Controller
 
         private void Columns_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         {
@@ -160,9 +248,9 @@ namespace Project
             {
                 foreach (GridViewColumn GVC in e.NewItems)
                 {
-                    if (!Columns.Keys.Contains(GVC))
+                    if (!Columns.ContainsKey(GVC))
                     {
-                        CheckColumens(DefaultGUT, DefaultWidth);
+                        CheckColumens(ColumnUnitType.Star, 1);
                         break;
                     }
                 }
@@ -170,113 +258,60 @@ namespace Project
             UpdateColumnWidths();
         }
 
-        private void LST_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateColumnWidths();
+        #endregion GridView Controller
 
-        private bool BlockUpdate = false;
-        private bool BlockColumnUpdate = false;
-
-        public void UpdateColumnWidths()
-        {
-            if (!IsDead)
-            {
-                if (!BlockUpdate)
-                {
-                    if (Columns.Count > 0)
-                    {
-                        new Thread(() =>
-                    {
-                        LST.Dispatcher.BeginInvoke(new Action(delegate ()
-                        {
-                            double Width = LSTWidth;
-                            if (Width > 0)
-                            {
-                                Dictionary<GridUnitType, List<GridViewColumn>> GUTColumn = new Dictionary<GridUnitType, List<GridViewColumn>>();
-                                GUTColumn.Add(GridUnitType.Auto, new List<GridViewColumn>());
-                                GUTColumn.Add(GridUnitType.Pixel, new List<GridViewColumn>());
-                                GUTColumn.Add(GridUnitType.Star, new List<GridViewColumn>());
-
-                                foreach (KeyValueTriple<GridViewColumn, GridUnitType, double> x in Columns)
-                                {
-                                    if (x.Value == GridUnitType.Auto && x.Control > 1)
-                                    {
-                                        BlockUpdate = true;
-                                        SetColumen(Columns.IndexOf(x.Key), GridUnitType.Auto);
-                                    }
-                                    if (GRD.Columns.Contains(x.Key)) GUTColumn[x.Value].Add(x.Key);
-                                }
-
-                                if (BlockUpdate)
-                                {
-                                    BlockUpdate = false;
-                                    UpdateColumnWidths();
-                                }
-                                else
-                                {
-                                    double ReservedWidth = ReturnControl(GUTColumn, GridUnitType.Pixel);
-                                    BlockColumnUpdate = true;
-                                    //foreach (GridViewColumn GVC in GUTColumn[GridUnitType.Auto]) GVC.Width = GetAutoWidth(GVC);
-                                    //ReservedWidth += ReturnControl(GUTColumn, GridUnitType.Auto);
-                                    double WidthRemaining = Width - ReservedWidth;
-                                    if (WidthRemaining < 0) WidthRemaining = 0;
-                                    List<GridViewColumn> StarAuto = new List<GridViewColumn>();
-                                    StarAuto.AddRange(GUTColumn[GridUnitType.Star]);
-                                    //StarAuto.AddRange(GUTColumn[GridUnitType.Auto]);
-                                    double StarWidth = ReturnControl(GUTColumn, GridUnitType.Star) + ReturnControl(GUTColumn, GridUnitType.Auto);
-                                    foreach (GridViewColumn GVC in StarAuto)
-                                    {
-                                        double Star = Columns[GVC].Control;
-                                        double StarPercent = Star / StarWidth;
-                                        GVC.Width = StarPercent * WidthRemaining;
-                                    }
-                                    BlockColumnUpdate = false;
-                                }
-                            }
-                        }));
-                    }).Start();
-                    }
-                }
-            }
-        }
-
-        private double ReturnControl(Dictionary<GridUnitType, List<GridViewColumn>> GUTColumn, GridUnitType GUT)
-        {
-            double Width = 0;
-            foreach (GridViewColumn GVC in GUTColumn[GUT]) Width += Columns[GVC].Control;
-            return Width;
-        }
+        private int ScrollBarInt = 17 + 3;
 
         public double LSTWidth
         {
             get
             {
-                //LST.Dispatcher.BeginInvoke(new Action(delegate ()
-                //{
                 double Width = LST.ActualWidth;
                 if (LST.Width > Width) Width = LST.Width;
                 return Width;
-                //}));
             }
         }
 
-        //private double GetAutoWidth(GridViewColumn GVC)
-        //{
-        //    var formattedText = new FormattedText(GVC.Header.ToString(), CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface(LST.FontFamily, LST.FontStyle, LST.FontWeight, LST.FontStretch), LST.FontSize, LST.Foreground, new NumberSubstitution(), TextFormattingMode.Display);
-        //    return formattedText.Width;// + 2;
-        //}
-
-        private bool IsDead = false;
-
-        public void Kill()
+        public double LSTHeight
         {
-            IsDead = true;
-            LST.SizeChanged -= LST_SizeChanged;
-            GRD.Columns.CollectionChanged -= Columns_CollectionChanged;
-            foreach (GridViewColumn x in Columns.Keys)
+            get
             {
-                INotifyPropertyChanged INP = x as INotifyPropertyChanged;
-                INP.PropertyChanged -= INP_PropertyChanged;
+                double Height = LST.ActualHeight;
+                if (LST.Height > Height) Height = LST.Height;
+                return Height;
             }
-            Columns = new Trictionary<GridViewColumn, GridUnitType, double>();
+        }
+
+        public bool LSTOverFlow
+        {
+            get
+            {
+                //15
+                double Inner_Height = 14;// 13;// 11.887555556;
+                foreach (object listBoxItem in LST.Items)
+                {
+                    try
+                    {
+                        ListViewItem container = LST.ItemContainerGenerator.ContainerFromItem(listBoxItem) as ListViewItem;
+                        Border listBoxItemBorder = VisualTreeHelper.GetChild(container, 0) as Border;
+                        Inner_Height += listBoxItemBorder.ActualHeight;
+                    }
+                    catch { }
+                }
+                return Inner_Height > LSTHeight - 22;
+            }
+        }
+
+        public GridViewColumn GetColumnAt(int ColumenIndex)
+        {
+            int Count = 0;
+            foreach (GridViewColumn GVC in GRD.Columns)
+            {
+                if (Count == ColumenIndex) return GVC;
+                else if (Count > ColumenIndex) break;
+                Count++;
+            }
+            return null;
         }
     }
 }
