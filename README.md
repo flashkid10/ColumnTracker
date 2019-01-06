@@ -3,5 +3,7 @@ Allow the ability  to set a Listview column width to GridUnitType.Star/GridUnitT
 
 * ListView.GetColumnTracker();
 * ListView.GetColumnTracker(ColumnUnitType.Star, 2);
+* ListView.GetColumnTracker(ColumnUnitType.HeaderWidth, (double)LRMargin);
+* ListView.GetColumnTracker(ColumnUnitType.Pixel, 100);
 * ListView.GetColumnTracker().GetColumenItem(GridViewColumnItem, ColumnUnitType.Star, 1);
 * ListView.GetColumnTracker().GetColumenItem(ColumnIndexInt).IsFixed = false;
