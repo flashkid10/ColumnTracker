@@ -1,10 +1,11 @@
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Windows.Controls;
-using System.Windows;
 using System;
-using System.Threading;
+using System.Windows;
 using System.Windows.Media;
+using System.Windows.Controls;
+using System.Threading;
+using System.ComponentModel;
+using System.Collections.Generic;
+using System.Globalization;
 
 namespace Project
 {
@@ -26,86 +27,20 @@ namespace Project
             else if (LST.View is GridView) return (ColumnTracker)(LST.Tag = new ColumnTracker(LST, CUT, Width));
             else return null;
         }
-    }
 
-    public enum ColumnUnitType { Pixel, Star }
-
-    public class ColumnController
-    {
-        public ColumnTracker ColumnTracker { get; set; }
-        public GridViewColumn Column { get; set; }
-        public ColumnUnitType ColumnUnitType { get; set; }
-        public double Width { get; set; }
-        public bool IsFixed { get; set; } = false;
-
-        public ColumnController(GridViewColumn GVC, ColumnTracker CT, ColumnUnitType GUT, double _Width)
+        public static Size MeasureString(string candidate, FontFamily FontFamily, FontStyle FontStyle, FontWeight FontWeight, FontStretch FontStretch, double FontSize, TextFormattingMode TextFormattingMode)
         {
-            ColumnTracker = CT;
+            var formattedText = new FormattedText(
+                candidate,
+                CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight,
+                new Typeface(FontFamily, FontStyle, FontWeight, FontStretch),
+                FontSize,
+                Brushes.Black,
+                new NumberSubstitution(),
+                TextFormattingMode);
 
-            switch (ColumnUnitType = GUT)
-            {
-                case ColumnUnitType.Pixel: IsFixed = false; break;
-                case ColumnUnitType.Star: IsFixed = true; break;
-            }
-            Width = _Width;
-            INotifyPropertyChanged INP = (Column = GVC) as INotifyPropertyChanged;
-            INP.PropertyChanged += Columen_SizeChanged;
-        }
-
-        private bool BlockColumnUpdate = false;
-
-        private void Columen_SizeChanged(object sender, PropertyChangedEventArgs e)
-        {
-            if (!BlockColumnUpdate)
-            {
-                if (e.PropertyName == "Width" || e.PropertyName == "ActualWidth") SetWidth();
-            }
-        }
-
-        private bool BlockSetWidth = false;
-
-        public void SetWidth()
-        {
-            if (!BlockSetWidth)
-            {
-                BlockColumnUpdate = true;
-                switch (ColumnUnitType)
-                {
-                    case ColumnUnitType.Pixel:
-                        if (IsFixed) Column.Width = Width;
-                        else
-                        {
-                            Width = Column.Width;
-                            ColumnTracker.UpdateColumnWidths();
-                        }
-
-                        break;
-
-                    case ColumnUnitType.Star:
-                        //if (IsFixed)
-                        //{
-                        Column.Width = Width * ColumnTracker.StarWidth;
-                        //}
-                        //else
-                        //{
-                        //    double HypoWid = ColumnTracker.LSTWidth / GetWidth();
-                        //    if (HypoWid == Width)
-                        //        Width = ColumnTracker.LSTWidth / GetWidth();
-                        //    BlockSetWidth = true;
-                        //    ColumnTracker.UpdateColumnWidths();
-                        //    BlockSetWidth = false;
-                        //}
-                        break;
-                }
-            }
-            BlockColumnUpdate = false;
-        }
-
-        public double GetWidth()
-        {
-            if (Column.Width != double.NaN) return Column.Width;
-            else if (Column.ActualWidth != double.NaN) return Column.ActualWidth;
-            else return double.NaN;
+            return new Size(formattedText.Width, formattedText.Height);
         }
     }
 
@@ -138,6 +73,8 @@ namespace Project
         {
             (LST = _LST).SizeChanged += LST_SizeChanged;
             (GRD = LST.View as GridView).Columns.CollectionChanged += Columns_CollectionChanged;
+            //LST.Items.CurrentChanged += Items_CurrentChanged;
+
             LST.Tag = this;
             LST.MouseDoubleClick += LST_MouseDoubleClick;
         }
@@ -185,13 +122,14 @@ namespace Project
 
         public ColumnController GetColumenItem(GridViewColumn GVC, ColumnUnitType CUT, double Width)
         {
-            // ColumnController CI = new ColumnController(GVC, this, CUT, Width);
             if (!Columns.ContainsKey(GVC)) Columns.Add(GVC, new ColumnController(GVC, this, CUT, Width));
             else
             {
                 Columns[GVC].ColumnUnitType = CUT;
                 Columns[GVC].Width = Width;
+                Columns[GVC].HWSet();
             }
+            Refresh();
             return Columns[GVC];
         }
 
@@ -203,7 +141,9 @@ namespace Project
 
         private void LST_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateColumnWidths();
 
-        public void UpdateColumnWidths()
+        //private void Items_CurrentChanged(object sender, EventArgs e) => UpdateColumnWidths();
+
+        private void UpdateColumnWidths()
         {
             if (Columns.Count > 0)
             {
@@ -211,13 +151,17 @@ namespace Project
                 {
                     LST.Dispatcher.BeginInvoke(new Action(delegate ()
                     {
-                        double PixelWidth = 0;
                         double StarDiv = 0;
+                        double PixelWidth = 0;
+                        if (LSTOverFlow) PixelWidth = ScrollBarInt;
+                        PixelWidth += 6; //>=6
+
                         List<ColumnController> StarController = new List<ColumnController>();
                         foreach (ColumnController CC in Columns.Values)
                         {
                             switch (CC.ColumnUnitType)
                             {
+                                case ColumnUnitType.HeaderWidth:
                                 case ColumnUnitType.Pixel: PixelWidth += CC.GetWidth(); break;
                                 case ColumnUnitType.Star:
                                     if (GRD.Columns.Contains(CC.Column))
@@ -229,7 +173,6 @@ namespace Project
                             }
                         }
 
-                        if (LSTOverFlow) PixelWidth += ScrollBarInt;
                         StarWidth = (LSTWidth - PixelWidth) / StarDiv;
                         if (StarWidth < 0) StarWidth = 0;
                         foreach (ColumnController CC in StarController) CC.SetWidth();
@@ -237,30 +180,6 @@ namespace Project
                 }).Start();
             }
         }
-
-        #endregion ListView Controller
-
-        #region GridView Controller
-
-        private void Columns_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-        {
-            if (e.NewItems != null)
-            {
-                foreach (GridViewColumn GVC in e.NewItems)
-                {
-                    if (!Columns.ContainsKey(GVC))
-                    {
-                        CheckColumens(ColumnUnitType.Star, 1);
-                        break;
-                    }
-                }
-            }
-            UpdateColumnWidths();
-        }
-
-        #endregion GridView Controller
-
-        private int ScrollBarInt = 17 + 3;
 
         public double LSTWidth
         {
@@ -302,6 +221,30 @@ namespace Project
             }
         }
 
+        #endregion ListView Controller
+
+        #region GridView Controller
+
+        private void Columns_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.NewItems != null)
+            {
+                foreach (GridViewColumn GVC in e.NewItems)
+                {
+                    if (!Columns.ContainsKey(GVC))
+                    {
+                        CheckColumens(ColumnUnitType.Star, 1);
+                        break;
+                    }
+                }
+            }
+            UpdateColumnWidths();
+        }
+
+        #endregion GridView Controller
+
+        private int ScrollBarInt = 17 + 3;
+
         public GridViewColumn GetColumnAt(int ColumenIndex)
         {
             int Count = 0;
@@ -313,5 +256,112 @@ namespace Project
             }
             return null;
         }
+
+        public void Refresh() => UpdateColumnWidths();
     }
+
+    public class ColumnController
+    {
+        public ColumnTracker ColumnTracker { get; set; }
+        public GridViewColumn Column { get; set; }
+        public double Width { get; set; }
+        public bool IsFixed { get; set; } = false;
+
+        public ColumnUnitType ColumnUnitType { get; set; }
+
+        public ColumnController(GridViewColumn GVC, ColumnTracker CT, ColumnUnitType GUT, double _Width)
+        {
+            ColumnTracker = CT;
+            Width = _Width;
+
+            switch (ColumnUnitType = GUT)
+            {
+                case ColumnUnitType.Pixel: IsFixed = false; break;
+                case ColumnUnitType.HeaderWidth: Column.Width = GetWidth(); goto case ColumnUnitType.Star;
+                case ColumnUnitType.Star: IsFixed = true; break;
+            }
+            INotifyPropertyChanged INP = (Column = GVC) as INotifyPropertyChanged;
+            INP.PropertyChanged += Columen_SizeChanged;
+        }
+
+        private bool BlockColumnUpdate = false;
+
+        private void Columen_SizeChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (!BlockColumnUpdate)
+            {
+                if (e.PropertyName == "Width" || e.PropertyName == "ActualWidth") SetWidth();
+            }
+        }
+
+        private bool BlockSetWidth = false;
+
+        public void SetWidth()
+        {
+            if (!BlockSetWidth)
+            {
+                BlockColumnUpdate = true;
+                switch (ColumnUnitType)
+                {
+                    case ColumnUnitType.Pixel:
+                        if (IsFixed) Column.Width = Width;
+                        else
+                        {
+                            Width = Column.Width;
+                            ColumnTracker.Refresh();
+                        }
+
+                        break;
+
+                    case ColumnUnitType.HeaderWidth: Column.Width = GetHeaderWidth(); break;
+
+                    case ColumnUnitType.Star:
+                        //if (IsFixed)
+                        //{
+                        Column.Width = Width * ColumnTracker.StarWidth;
+                        //}
+                        //else
+                        //{
+                        //    double HypoWid = ColumnTracker.LSTWidth / GetWidth();
+                        //    if (HypoWid == Width)
+                        //        Width = ColumnTracker.LSTWidth / GetWidth();
+                        //    BlockSetWidth = true;
+                        //    ColumnTracker.UpdateColumnWidths();
+                        //    BlockSetWidth = false;
+                        //}
+                        break;
+                }
+            }
+            BlockColumnUpdate = false;
+        }
+
+        public void HWSet()
+        {
+            switch (ColumnUnitType)
+            {
+                case ColumnUnitType.Pixel: break;
+                case ColumnUnitType.Star: break;
+                case ColumnUnitType.HeaderWidth: Column.Width = Width; break;
+            }
+        }
+
+        public double GetWidth()
+        {
+            switch (ColumnUnitType)
+            {
+                case ColumnUnitType.HeaderWidth: return GetHeaderWidth();
+                default:
+                    if (Column.Width != double.NaN) return Column.Width;
+                    else if (Column.ActualWidth != double.NaN) return Column.ActualWidth;
+                    else return double.NaN;
+            }
+        }
+
+        public double GetHeaderWidth()
+        {
+            return Width + 10 + Utils.MeasureString(Column.Header.ToString(), new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal, 12, TextFormattingMode.Ideal).Width;
+        }
+    }
+
+    public enum ColumnUnitType { Pixel, Star, HeaderWidth }
 }
